@@ -7,6 +7,7 @@
 #include <board/kbled.h>
 #include <board/lid.h>
 #include <board/peci.h>
+#include <common/macro.h>
 #include <common/debug.h>
 #include <ec/pwm.h>
 
@@ -86,24 +87,24 @@ uint8_t acpi_read(uint8_t addr) {
         case 0x03:
             if (gpio_get(&LID_SW_N)) {
                 // Lid is open
-                data |= 1 << 0;
+                data |= BIT(0);
             }
             if (lid_wake) {
-                data |= 1 << 2;
+                data |= BIT(2);
             }
             break;
 
-        ACPI_8(0x07, peci_temp >> 6);
+        ACPI_8(0x07, peci_temp);
 
         // Handle AC adapter and battery present
         case 0x10:
             if (!gpio_get(&ACIN_N)) {
                 // AC adapter connected
-                data |= 1 << 0;
+                data |= BIT(0);
             }
             if (battery_status & BATTERY_INITIALIZED) {
                 // BAT0 connected
-                data |= 1 << 2;
+                data |= BIT(2);
             }
             break;
 
@@ -117,7 +118,7 @@ uint8_t acpi_read(uint8_t addr) {
                 // And battery is not fully charged
                 if (battery_current != 0) {
                     // Battery is charging
-                    data |= 1 << 1;
+                    data |= BIT(1);
                 }
             }
             break;
@@ -152,7 +153,7 @@ uint8_t acpi_read(uint8_t addr) {
         // Airplane mode LED
         case 0xD9:
             if (!gpio_get(&LED_AIRPLANE_N)) {
-                data |= (1 << 6);
+                data |= BIT(6);
             }
             break;
 #endif // HAVE_LED_AIRPLANE_N
@@ -168,17 +169,17 @@ uint8_t acpi_read(uint8_t addr) {
         ACPI_8 (0xFD, fbuf[3]);
     }
 
-    DEBUG("acpi_read %02X = %02X\n", addr, data);
+    TRACE("acpi_read %02X = %02X\n", addr, data);
     return data;
 }
 
 void acpi_write(uint8_t addr, uint8_t data) {
-    DEBUG("acpi_write %02X = %02X\n", addr, data);
+    TRACE("acpi_write %02X = %02X\n", addr, data);
 
     switch (addr) {
         // Lid state and other flags
         case 0x03:
-            lid_wake = (bool)(data & (1 << 2));
+            lid_wake = (bool)(data & BIT(2));
             break;
 
         case 0x68:
@@ -196,7 +197,7 @@ void acpi_write(uint8_t addr, uint8_t data) {
 #if HAVE_LED_AIRPLANE_N
         // Airplane mode LED
         case 0xD9:
-            gpio_set(&LED_AIRPLANE_N, !(bool)(data & (1 << 6)));
+            gpio_set(&LED_AIRPLANE_N, !(bool)(data & BIT(6)));
             break;
 #endif
 

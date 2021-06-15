@@ -6,6 +6,7 @@
 #include <board/battery.h>
 #include <board/board.h>
 #include <board/config.h>
+#include <board/fan.h>
 #include <board/gpio.h>
 #include <board/kbled.h>
 #include <board/lid.h>
@@ -13,6 +14,11 @@
 #include <board/pmc.h>
 #include <board/pnp.h>
 #include <common/debug.h>
+
+#include <ec/espi.h>
+#if EC_ESPI
+    #include <board/espi.h>
+#endif
 
 #define GPIO_SET_DEBUG(G, V) { \
     DEBUG("%s = %s\n", #G, V ? "true" : "false"); \
@@ -283,8 +289,21 @@ void power_on_s5(void) {
     // Wait for SUSPWRDNACK validity
     tPLT01;
 
-    // Extra wait - TODO remove
-    delay_ms(200);
+    for (int i = 0; i < 1000; i++) {
+        // If we reached S0, exit this loop
+        update_power_state();
+        if (power_state == POWER_STATE_S0) {
+            break;
+        }
+
+        // Check for VW changes
+        #if EC_ESPI
+            espi_event();
+        #endif // EC_ESPI
+
+        // Extra wait until SUSPWRDNACK is valid
+        delay_ms(1);
+    }
 #endif // DEEP_SX
 
     update_power_state();
@@ -332,13 +351,20 @@ void power_off_s5(void) {
 }
 
 // This function is run when the CPU is reset
-static void power_cpu_reset(void) {
+void power_cpu_reset(void) {
     // LPC was just reset, enable PNP devices
     pnp_enable();
     // Reset ACPI registers
     acpi_reset();
+    // Reset fans
+    fan_reset();
     //TODO: reset KBC and touchpad states
     kbled_reset();
+}
+
+static bool power_button_disabled(void) {
+    // Disable power button if lid is closed and AC is disconnected
+    return !gpio_get(&LID_SW_N) && gpio_get(&ACIN_N);
 }
 
 void power_event(void) {
@@ -390,17 +416,22 @@ void power_event(void) {
     // Read power switch state
     static bool ps_last = true;
     bool ps_new = gpio_get(&PWR_SW_N);
-    // Disable power button if lid is closed and AC is disconnected
-    if (!lid_state && ac_last) {
-        ps_new = true;
-    }
     if (!ps_new && ps_last) {
         // Ensure press is not spurious
-        delay_ms(10);
-        if (gpio_get(&PWR_SW_N) != ps_new) {
-            DEBUG("%02X: Spurious press\n", main_cycle);
-            ps_new = ps_last;
-        } else {
+        for (int i = 0; i < 100; i++) {
+            delay_ms(1);
+            if (gpio_get(&PWR_SW_N) != ps_new) {
+                DEBUG("%02X: Spurious press\n", main_cycle);
+                ps_new = ps_last;
+                break;
+            } else if (power_button_disabled()) {
+                // Ignore press when power button disabled
+                ps_new = ps_last;
+                break;
+            }
+        }
+
+        if (ps_new != ps_last) {
             DEBUG("%02X: Power switch press\n", main_cycle);
 
             // Enable S5 power if necessary, before sending PWR_BTN
@@ -465,7 +496,11 @@ void power_event(void) {
     #endif
     if(rst_new && !rst_last) {
         DEBUG("%02X: PLT_RST# de-asserted\n", main_cycle);
+#if EC_ESPI
+        espi_reset();
+#else // EC_ESPI
         power_cpu_reset();
+#endif // EC_ESPI
     }
     rst_last = rst_new;
 
@@ -482,7 +517,9 @@ void power_event(void) {
     #endif
 #endif // HAVE_SLP_SUS_N
 
-#if HAVE_SUSWARN_N
+#if EC_ESPI
+    if (vw_get(&VW_SUS_PWRDN_ACK) == VWS_HIGH)
+#elif HAVE_SUSWARN_N
     // EC must keep VccPRIM powered if SUSPWRDNACK is de-asserted low or system
     // state is S3
     static bool ack_last = false;
@@ -526,9 +563,25 @@ void power_event(void) {
     static uint32_t last_time = 0;
     uint32_t time = time_get();
     if (power_state == POWER_STATE_S0) {
-        // CPU on, green light
-        gpio_set(&LED_PWR, true);
-        gpio_set(&LED_ACIN, false);
+#if EC_ESPI
+        if (!gpio_get(&CPU_C10_GATE_N)) {
+            // Modern suspend, flashing green light
+            if (
+                (time < last_time) // overflow
+                ||
+                (time >= (last_time + 1000)) // timeout
+            ) {
+                gpio_set(&LED_PWR, !gpio_get(&LED_PWR));
+                last_time = time;
+            }
+            gpio_set(&LED_ACIN, false);
+        } else
+#endif
+        {
+            // CPU on, green light
+            gpio_set(&LED_PWR, true);
+            gpio_set(&LED_ACIN, false);
+        }
     } else if (power_state == POWER_STATE_S3 || power_state == POWER_STATE_DS3) {
         // Suspended, flashing green light
         if (

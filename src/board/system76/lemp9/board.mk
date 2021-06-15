@@ -2,9 +2,12 @@
 
 EC=it5570e
 
-# Add keymap to src
-KEYMAP?=default
-SRC+=$(BOARD_DIR)/keymap/$(KEYMAP).c
+# Include keyboard
+KEYBOARD=14in_83
+
+# Set keyboard LED mechanism
+KBLED=white_dac
+CFLAGS+=-DKBLED_DAC=2
 
 # Set battery I2C bus
 CFLAGS+=-DI2C_SMBUS=I2C_4
@@ -18,11 +21,6 @@ CFLAGS+=\
 	-DCHARGER_CHARGE_CURRENT=1536 \
 	-DCHARGER_CHARGE_VOLTAGE=8800 \
 	-DCHARGER_INPUT_CURRENT=1600
-
-# Set battery charging thresholds
-CFLAGS+=\
-	-DBATTERY_START_THRESHOLD=0 \
-	-DBATTERY_END_THRESHOLD=100
 
 # Add system76 common code
 include src/board/system76/common/common.mk

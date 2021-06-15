@@ -19,7 +19,8 @@
 
 #ifndef __SCRATCH__
     #include <board/scratch.h>
-    #include <board/keymap.h>
+    #include <board/kbled.h>
+    #include <board/kbscan.h>
 #endif
 #include <board/smfi.h>
 #include <common/command.h>
@@ -95,10 +96,10 @@ void smfi_init(void) {
     HRAMW1AAS = 0x34;
 
     // Enable H2RAM window 0 and 1 using LPC I/O
-    HRAMWC |= (1 << 4) | (1 << 1) | (1 << 0);
+    HRAMWC |= BIT(4) | BIT(1) | BIT(0);
 
     // Enable backup ROM access
-    FLHCTRL3 |= (1 << 3);
+    FLHCTRL3 |= BIT(3);
 }
 
 static enum Result cmd_print(void) {
@@ -153,33 +154,94 @@ static enum Result cmd_keymap_get(void) {
     int layer = smfi_cmd[SMFI_CMD_DATA];
     int output = smfi_cmd[SMFI_CMD_DATA + 1];
     int input = smfi_cmd[SMFI_CMD_DATA + 2];
-
-    if (layer < KM_LAY && output < KM_OUT && input < KM_IN) {
-        uint16_t key = KEYMAP[layer][output][input];
+    uint16_t key = 0;
+    if (keymap_get(layer, output, input, &key)) {
         smfi_cmd[SMFI_CMD_DATA + 3] = (uint8_t)key;
         smfi_cmd[SMFI_CMD_DATA + 4] = (uint8_t)(key >> 8);
         return RES_OK;
+    } else {
+        return RES_ERR;
     }
-
-    // Failed if keyboard mapping not found
-    return RES_ERR;
 }
 
 static enum Result cmd_keymap_set(void) {
     int layer = smfi_cmd[SMFI_CMD_DATA];
     int output = smfi_cmd[SMFI_CMD_DATA + 1];
     int input = smfi_cmd[SMFI_CMD_DATA + 2];
-
-    if (layer < KM_LAY && output < KM_OUT && input < KM_IN) {
-        uint16_t key =
-            ((uint16_t)smfi_cmd[SMFI_CMD_DATA + 3]) |
-            (((uint16_t)smfi_cmd[SMFI_CMD_DATA + 4]) << 8);
-        KEYMAP[layer][output][input] = key;
-        return RES_OK;
+    uint16_t key =
+        ((uint16_t)smfi_cmd[SMFI_CMD_DATA + 3]) |
+        (((uint16_t)smfi_cmd[SMFI_CMD_DATA + 4]) << 8);
+    //TODO: consider only setting if the key has changed
+    if (keymap_set(layer, output, input, key)) {
+        //TODO: should we write config on every change?
+        if (keymap_save_config()) {
+            return RES_OK;
+        } else {
+            //TODO: need a different error code?
+            return RES_ERR;
+        }
+    } else {
+        return RES_ERR;
     }
+}
 
-    // Failed if keyboard mapping not found
-    return RES_ERR;
+static enum Result cmd_led_get_value(void) {
+    uint8_t index = smfi_cmd[SMFI_CMD_DATA];
+    if (index == CMD_LED_INDEX_ALL) {
+        smfi_cmd[SMFI_CMD_DATA + 1] = kbled_get();
+        smfi_cmd[SMFI_CMD_DATA + 2] = kbled_max();
+        return RES_OK;
+    } else {
+        return RES_ERR;
+    }
+}
+
+static enum Result cmd_led_set_value(void) {
+    uint8_t index = smfi_cmd[SMFI_CMD_DATA];
+    if (index == CMD_LED_INDEX_ALL) {
+        kbled_set(smfi_cmd[SMFI_CMD_DATA + 1]);
+        return RES_OK;
+    } else {
+        return RES_ERR;
+    }
+}
+
+static enum Result cmd_led_get_color(void) {
+    uint8_t index = smfi_cmd[SMFI_CMD_DATA];
+    if (index == CMD_LED_INDEX_ALL) {
+        uint32_t color = kbled_get_color();
+        smfi_cmd[SMFI_CMD_DATA + 1] = (uint8_t)(color >> 16);
+        smfi_cmd[SMFI_CMD_DATA + 2] = (uint8_t)(color >> 8);
+        smfi_cmd[SMFI_CMD_DATA + 3] = (uint8_t)(color >> 0);
+        return RES_OK;
+    } else {
+        return RES_ERR;
+    }
+}
+
+static enum Result cmd_led_set_color(void) {
+    uint8_t index = smfi_cmd[SMFI_CMD_DATA];
+    if (index == CMD_LED_INDEX_ALL) {
+        kbled_set_color(
+            (((uint32_t)smfi_cmd[SMFI_CMD_DATA + 1]) << 16) |
+            (((uint32_t)smfi_cmd[SMFI_CMD_DATA + 2]) << 8) |
+            (((uint32_t)smfi_cmd[SMFI_CMD_DATA + 3]) << 0)
+        );
+        return RES_OK;
+    } else {
+        return RES_ERR;
+    }
+}
+
+static enum Result cmd_matrix_get(void) {
+    smfi_cmd[SMFI_CMD_DATA] = KM_OUT;
+    smfi_cmd[SMFI_CMD_DATA + 1] = KM_IN;
+    for (uint8_t row = 0; row < KM_OUT; row++) {
+        if ((SMFI_CMD_DATA + 2 + row) < ARRAY_SIZE(smfi_cmd)) {
+            smfi_cmd[SMFI_CMD_DATA + 2 + row] = kbscan_matrix[row];
+        }
+    }
+    return RES_OK;
 }
 #endif // !defined(__SCRATCH__)
 
@@ -236,7 +298,7 @@ static enum Result cmd_spi(void) {
 
 static enum Result cmd_reset(void) {
     // Attempt to trigger watchdog reset
-    ETWCFG |= (1 << 5);
+    ETWCFG |= BIT(5);
     EWDKEYR = 0;
 
     // Failed if it got this far
@@ -293,6 +355,21 @@ void smfi_event(void) {
                 break;
             case CMD_KEYMAP_SET:
                 smfi_cmd[SMFI_CMD_RES] = cmd_keymap_set();
+                break;
+            case CMD_LED_GET_VALUE:
+                smfi_cmd[SMFI_CMD_RES] = cmd_led_get_value();
+                break;
+            case CMD_LED_SET_VALUE:
+                smfi_cmd[SMFI_CMD_RES] = cmd_led_set_value();
+                break;
+            case CMD_LED_GET_COLOR:
+                smfi_cmd[SMFI_CMD_RES] = cmd_led_get_color();
+                break;
+            case CMD_LED_SET_COLOR:
+                smfi_cmd[SMFI_CMD_RES] = cmd_led_set_color();
+                break;
+            case CMD_MATRIX_GET:
+                smfi_cmd[SMFI_CMD_RES] = cmd_matrix_get();
                 break;
 #endif // !defined(__SCRATCH__)
             case CMD_SPI:

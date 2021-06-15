@@ -21,8 +21,31 @@ PROGRAMMER=$(wildcard /dev/serial/by-id/usb-Arduino*)
 # Include system76 common source
 SYSTEM76_COMMON_DIR=src/board/system76/common
 SRC+=$(wildcard $(SYSTEM76_COMMON_DIR)/*.c)
-INCLUDE+=$(wildcard $(SYSTEM76_COMMON_DIR)/include/common/*.h) $(SYSTEM76_COMMON_DIR)/common.mk
+INCLUDE+=$(wildcard $(SYSTEM76_COMMON_DIR)/include/board/*.h) $(SYSTEM76_COMMON_DIR)/common.mk
 CFLAGS+=-I$(SYSTEM76_COMMON_DIR)/include
+
+# Set battery charging thresholds
+BATTERY_START_THRESHOLD?=0
+BATTERY_END_THRESHOLD?=100
+
+CFLAGS+=\
+	-DBATTERY_START_THRESHOLD=$(BATTERY_START_THRESHOLD) \
+	-DBATTERY_END_THRESHOLD=$(BATTERY_END_THRESHOLD)
+
+# Add charger
+CHARGER?=bq24780s
+SRC+=$(SYSTEM76_COMMON_DIR)/charger/$(CHARGER).c
+
+# Add keyboard
+ifndef KEYBOARD
+$(error KEYBOARD is not set by the board)
+endif
+KEYBOARD_DIR=src/keyboard/system76/$(KEYBOARD)
+include $(KEYBOARD_DIR)/keyboard.mk
+
+# Add kbled
+KBLED?=none
+SRC+=$(SYSTEM76_COMMON_DIR)/kbled/$(KBLED).c
 
 # Add scratch ROM
 include $(SYSTEM76_COMMON_DIR)/scratch/scratch.mk

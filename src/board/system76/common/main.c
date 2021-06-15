@@ -10,11 +10,13 @@
 #include <board/board.h>
 #include <board/dgpu.h>
 #include <board/ecpm.h>
+#include <board/fan.h>
 #include <board/gpio.h>
 #include <board/gctrl.h>
 #include <board/kbc.h>
 #include <board/kbled.h>
 #include <board/kbscan.h>
+#include <board/keymap.h>
 #include <board/lid.h>
 #include <board/peci.h>
 #include <board/pmc.h>
@@ -23,7 +25,6 @@
 #include <board/pwm.h>
 #include <board/smbus.h>
 #include <board/smfi.h>
-#include <board/touchpad.h>
 #include <common/debug.h>
 #include <common/macro.h>
 #include <common/version.h>
@@ -42,6 +43,10 @@ void serial(void) __interrupt(4) {}
 void timer_2(void) __interrupt(5) {}
 
 uint8_t main_cycle = 0;
+const uint16_t battery_interval = 1000;
+// update fan speed more frequently for smoother fans
+// NOTE: event loop is longer than 100ms and maybe even longer than 250
+const uint16_t fan_interval = SMOOTH_FANS != 0 ? 250 : 1000;
 
 void init(void) {
     // Must happen first
@@ -66,6 +71,7 @@ void init(void) {
     {
         kbscan_init();
     }
+    keymap_init();
     peci_init();
     pmc_init();
     pwm_init();
@@ -89,9 +95,11 @@ void main(void) {
 
     INFO("System76 EC board '%s', version '%s'\n", board(), version());
 
-    uint32_t last_time = 0;
+    uint32_t last_time_battery = 0;
+    uint32_t last_time_fan = 0;
+
     for(main_cycle = 0; ; main_cycle++) {
-        switch (main_cycle % 5) {
+        switch (main_cycle % 3) {
             case 0:
                 // Handle power states
                 power_event();
@@ -106,14 +114,6 @@ void main(void) {
                 }
                 break;
             case 2:
-                // Passes through touchpad packets
-                touchpad_event();
-                break;
-            case 3:
-                // Checks for keyboard/mouse packets from host
-                kbc_event(&KBC);
-                break;
-            case 4:
                 // Handle lid close/open
                 lid_event();
                 break;
@@ -121,17 +121,17 @@ void main(void) {
 
         if (main_cycle == 0) {
             uint32_t time = time_get();
-            // Only run the following once a second
-            if (last_time > time || (time - last_time) >= 1000) {
-                last_time = time;
+            // Only run the following once per interval
+            if (last_time_fan > time || (time - last_time_fan) >= fan_interval) {
+                last_time_fan = time;
 
-                // Updates fan status and temps
-                peci_event();
+                // Update fan speeds
+                fan_duty_set(peci_get_fan_duty(), dgpu_get_fan_duty());
+            }
 
-#if HAVE_DGPU
-                // Updates discrete GPU fan status and temps
-                dgpu_event();
-#endif
+            // Only run the following once per interval
+            if (last_time_battery > time || (time - last_time_battery) >= battery_interval) {
+                last_time_battery = time;
 
                 // Updates battery status
                 battery_event();
@@ -141,6 +141,8 @@ void main(void) {
         // Board-specific events
         board_event();
 
+        // Checks for keyboard/mouse packets from host
+        kbc_event(&KBC);
         // Handles ACPI communication
         pmc_event(&PMC_1);
         // AP/EC communication over SMFI

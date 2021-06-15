@@ -3,14 +3,15 @@
 #include <arch/delay.h>
 #include <arch/time.h>
 #include <board/acpi.h>
+#include <board/fan.h>
 #include <board/gpio.h>
 #include <board/kbc.h>
 #include <board/kbled.h>
 #include <board/kbscan.h>
-#include <board/keymap.h>
 #include <board/lid.h>
 #include <board/pmc.h>
 #include <board/power.h>
+#include <common/macro.h>
 #include <common/debug.h>
 
 // Default to not n-key rollover
@@ -24,6 +25,8 @@ bool kbscan_esc_held = false;
 bool kbscan_enabled = false;
 uint16_t kbscan_repeat_period = 91;
 uint16_t kbscan_repeat_delay = 500;
+
+uint8_t kbscan_matrix[KM_OUT] = { 0 };
 
 uint8_t sci_extra = 0;
 
@@ -58,9 +61,14 @@ void kbscan_init(void) {
 #define DEBOUNCE_DELAY 15
 
 static uint8_t kbscan_get_row(int i) {
+    // Report all keys as released when lid is closed
+    if (!lid_state) {
+        return 0;
+    }
+
     // Set current line as output
     if (i < 8) {
-        KSOLGOEN = 1 << i;
+        KSOLGOEN = BIT(i);
         KSOHGOEN = 0;
 #if KM_OUT >= 17
         GPCRC3 = GPIO_IN;
@@ -70,7 +78,7 @@ static uint8_t kbscan_get_row(int i) {
 #endif
     } else if (i < 16) {
         KSOLGOEN = 0;
-        KSOHGOEN = 1 << (i - 8);
+        KSOHGOEN = BIT((i - 8));
 #if KM_OUT >= 17
         GPCRC3 = GPIO_IN;
 #endif
@@ -97,14 +105,14 @@ static uint8_t kbscan_get_row(int i) {
 #endif
     }
 #if KM_OUT >= 17
-    GPDRC &= ~(1 << 3);
+    GPDRC &= ~BIT(3);
 #endif
 #if KM_OUT >= 18
-    GPDRC &= ~(1 << 5);
+    GPDRC &= ~BIT(5);
 #endif
 
     // TODO: figure out optimal delay
-    delay_ticks(10);
+    delay_ticks(20);
 
     return ~KSI;
 }
@@ -125,8 +133,10 @@ static uint8_t kbscan_get_real_keys(int row, uint8_t rowdata) {
     // Remove any "active" blanks from the matrix.
     uint8_t realdata = 0;
     for (uint8_t col = 0; col < KM_IN; col++) {
-        if (KEYMAP[0][row][col] && (rowdata & (1 << col))) {
-            realdata |=  1 << col;
+        // This tests the default keymap intentionally, to avoid blanks in the
+        // dynamic keymap
+        if (KEYMAP[0][row][col] && (rowdata & BIT(col))) {
+            realdata |=  BIT(col);
         }
     }
 
@@ -161,6 +171,9 @@ static void hardware_hotkey(uint16_t key) {
         case K_CAMERA_TOGGLE:
             gpio_set(&CCD_EN, !gpio_get(&CCD_EN));
             break;
+        case K_FAN_TOGGLE:
+            fan_max = !fan_max;
+            break;
         case K_KBD_BKL:
             kbled_set(kbled_get() + 1);
             break;
@@ -184,9 +197,7 @@ bool kbscan_press(uint16_t key, bool pressed, uint8_t * layer) {
     if (pressed &&
         lid_state &&
         (power_state == POWER_STATE_S3 || power_state == POWER_STATE_DS3)) {
-        gpio_set(&SWI_N, false);
-        delay_ticks(10); //TODO: find correct delay
-        gpio_set(&SWI_N, true);
+        pmc_swi();
     }
 
     switch (key & KT_MASK) {
@@ -271,6 +282,7 @@ static inline bool key_should_repeat(uint16_t key) {
     case K_AIRPLANE_MODE:
     case K_CAMERA_TOGGLE:
     case K_DISPLAY_TOGGLE:
+    case K_FAN_TOGGLE:
     case K_SUSPEND:
     case K_KBD_BKL:
     case K_KBD_COLOR:
@@ -284,7 +296,6 @@ static inline bool key_should_repeat(uint16_t key) {
 void kbscan_event(void) {
     static uint8_t kbscan_layer = 0;
     uint8_t layer = kbscan_layer;
-    static uint8_t kbscan_last[KM_OUT] = { 0 };
     static uint8_t kbscan_last_layer[KM_OUT][KM_IN] = { { 0 } };
     static bool kbscan_ghost[KM_OUT] = { false };
 
@@ -307,7 +318,7 @@ void kbscan_event(void) {
     int i;
     for (i = 0; i < KM_OUT; i++) {
         uint8_t new = kbscan_get_row(i);
-        uint8_t last = kbscan_last[i];
+        uint8_t last = kbscan_matrix[i];
         if (new != last) {
             if (kbscan_has_ghost_in_row(i, new)) {
                 kbscan_ghost[i] = true;
@@ -322,8 +333,8 @@ void kbscan_event(void) {
             // A key was pressed or released
             int j;
             for (j = 0; j < KM_IN; j++) {
-                bool new_b = new & (1 << j);
-                bool last_b = last & (1 << j);
+                bool new_b = new & BIT(j);
+                bool last_b = last & BIT(j);
                 if (new_b != last_b) {
                     bool reset = false;
 
@@ -349,9 +360,7 @@ void kbscan_event(void) {
                         }
                         uint8_t key_layer = kbscan_last_layer[i][j];
                         uint16_t key = 0;
-                        if (key_layer < KM_LAY) {;
-                            key = KEYMAP[key_layer][i][j];
-                        }
+                        keymap_get(key_layer, i, j, &key);
                         if (key) {
                             DEBUG("KB %d, %d, %d = 0x%04X, %d\n", i, j, key_layer, key, new_b);
                             if(!kbscan_press(key, new_b, &layer)){
@@ -377,15 +386,15 @@ void kbscan_event(void) {
                     // Reset bit to last state
                     if (reset) {
                         if (last_b) {
-                            new |= (1 << j);
+                            new |= BIT(j);
                         } else {
-                            new &= ~(1 << j);
+                            new &= ~BIT(j);
                         }
                     }
                 }
             }
 
-            kbscan_last[i] = new;
+            kbscan_matrix[i] = new;
         } else if (new && repeat_key != 0 && key_should_repeat(repeat_key)) {
             // A key is being pressed
             uint32_t time = time_get();

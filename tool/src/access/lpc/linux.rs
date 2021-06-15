@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use std::{
     fs,
     io::{
@@ -111,8 +113,8 @@ impl AccessLpcLinux {
             )));
         }
 
-        let cmd = PortLock::new(SMFI_CMD_BASE, SMFI_CMD_BASE + SMFI_CMD_SIZE as u16 - 1).map_err(Error::Io)?;
-        let dbg = PortLock::new(SMFI_DBG_BASE, SMFI_DBG_BASE + SMFI_DBG_SIZE as u16 - 1).map_err(Error::Io)?;
+        let cmd = PortLock::new(SMFI_CMD_BASE, SMFI_CMD_BASE + SMFI_CMD_SIZE as u16 - 1)?;
+        let dbg = PortLock::new(SMFI_DBG_BASE, SMFI_DBG_BASE + SMFI_DBG_SIZE as u16 - 1)?;
         Ok(Self {
             cmd,
             dbg,
@@ -122,18 +124,12 @@ impl AccessLpcLinux {
 
     /// Read from the command space
     unsafe fn read_cmd(&mut self, addr: u8) -> Result<u8, Error> {
-        self.cmd.read(addr as u16).map_err(Error::Io)
+        Ok(self.cmd.read(addr as u16)?)
     }
 
     /// Write to the command space
     unsafe fn write_cmd(&mut self, addr: u8, data: u8) -> Result<(), Error> {
-        self.cmd.write(addr as u16, data).map_err(Error::Io)
-    }
-
-    /// Read from the debug space
-    //TODO: better public interface
-    pub unsafe fn read_debug(&mut self, addr: u8) -> Result<u8, Error> {
-        self.dbg.read(addr as u16).map_err(Error::Io)
+        Ok(self.cmd.write(addr as u16, data)?)
     }
 
     /// Returns Ok if a command can be sent
@@ -179,5 +175,9 @@ impl Access for AccessLpcLinux {
 
     fn data_size(&self) -> usize {
         SMFI_CMD_SIZE - SMFI_CMD_DATA as usize
+    }
+
+    unsafe fn read_debug(&mut self, addr: u8) -> Result<u8, Error> {
+        Ok(self.dbg.read(addr as u16)?)
     }
 }

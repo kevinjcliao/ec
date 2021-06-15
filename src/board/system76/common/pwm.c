@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include <board/pwm.h>
+#include <common/macro.h>
 
 void pwm_init(void) {
     // Set T0CHSEL to TACH0A and T1CHSEL to TACH1A
@@ -22,9 +23,9 @@ void pwm_init(void) {
     // Set cycle time to 255 + 1
     CTR0 = 255;
 
-    // Turn off CPU fan (temperature control in peci_event)
+    // Turn off CPU fan (temperature control in peci_get_fan_duty)
     DCR2 = 0;
 
     // Enable PWM
-    ZTIER = (1 << 1);
+    ZTIER = BIT(1);
 }

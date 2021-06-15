@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use hidapi::HidDevice;
 
 use crate::{
@@ -23,6 +25,10 @@ impl AccessHid {
         })
     }
 
+    pub fn device(&mut self) -> &mut HidDevice {
+        &mut self.device
+    }
+
     unsafe fn command_try(&mut self, cmd: u8, data: &mut [u8]) -> Result<Option<u8>, Error> {
         const HID_CMD: usize = 1;
         const HID_RES: usize = 2;
@@ -38,12 +44,12 @@ impl AccessHid {
             hid_data[HID_DATA + i] = data[i];
         }
 
-        let count = self.device.write(&hid_data).map_err(Error::Hid)?;
+        let count = self.device.write(&hid_data)?;
         if count != hid_data.len() {
             return Err(Error::Verify);
         }
 
-        let count = self.device.read_timeout(&mut hid_data[1..], self.timeout).map_err(Error::Hid)?;
+        let count = self.device.read_timeout(&mut hid_data[1..], self.timeout)?;
         if count == hid_data.len() - 1 {
             for i in 0..data.len() {
                 data[i] = hid_data[HID_DATA + i];

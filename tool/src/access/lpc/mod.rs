@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 const SMFI_CMD_BASE: u16 = 0xE00;
 const SMFI_CMD_SIZE: usize = 0x100;
 
@@ -17,3 +19,8 @@ mod direct;
 pub use self::linux::AccessLpcLinux;
 #[cfg(all(feature = "std", target_os = "linux"))]
 mod linux;
+
+#[cfg(feature = "std")]
+mod sim;
+#[cfg(feature = "std")]
+pub use self::sim::AccessLpcSim;

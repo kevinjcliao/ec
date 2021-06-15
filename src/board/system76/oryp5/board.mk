@@ -2,18 +2,18 @@
 
 EC=it8587e
 
-# Add keymap to src
-KEYMAP?=default
-SRC+=$(BOARD_DIR)/keymap/$(KEYMAP).c
+# Include keyboard
+KEYBOARD=15in_102
+
+# Set keyboard LED mechanism
+KBLED=oryp5
+CFLAGS+=-DI2C_KBLED=I2C_1
 
 # Set discrete GPU I2C bus
 CFLAGS+=-DI2C_DGPU=I2C_1
 
 # Set battery I2C bus
 CFLAGS+=-DI2C_SMBUS=I2C_0
-
-# Set keyboard LED I2C bus
-CFLAGS+=-DI2C_KBLED=I2C_1
 
 # Set touchpad PS2 bus
 CFLAGS+=-DPS2_TOUCHPAD=PS2_3
@@ -24,19 +24,12 @@ CFLAGS+=\
 	-DCHARGER_CHARGE_VOLTAGE=17120 \
 	-DCHARGER_INPUT_CURRENT=9230
 
-# Set battery charging thresholds
-CFLAGS+=\
-       -DBATTERY_START_THRESHOLD=0 \
-       -DBATTERY_END_THRESHOLD=100
-
 # Set CPU power limits in watts
 CFLAGS+=\
 	-DPOWER_LIMIT_AC=180 \
 	-DPOWER_LIMIT_DC=28
 
 # Custom fan curve
-CFLAGS+=-DBOARD_HEATUP=5
-CFLAGS+=-DBOARD_COOLDOWN=20
 CFLAGS+=-DBOARD_FAN_POINTS="\
 	FAN_POINT(60, 40), \
 	FAN_POINT(65, 60), \
@@ -47,8 +40,6 @@ CFLAGS+=-DBOARD_FAN_POINTS="\
 
 # Enable DGPU support
 CFLAGS+=-DHAVE_DGPU=1
-CFLAGS+=-DBOARD_DGPU_HEATUP=5
-CFLAGS+=-DBOARD_DGPU_COOLDOWN=20
 CFLAGS+=-DBOARD_DGPU_FAN_POINTS="\
 	FAN_POINT(60, 40), \
 	FAN_POINT(65, 60), \

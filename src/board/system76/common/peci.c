@@ -1,45 +1,36 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include <stdbool.h>
-
+#include <board/fan.h>
+#include <board/gpio.h>
 #include <board/peci.h>
 #include <board/power.h>
 #include <common/debug.h>
 #include <common/macro.h>
+#include <ec/espi.h>
 #include <ec/gpio.h>
 #include <ec/pwm.h>
 
 // Fan speed is the lowest requested over HEATUP seconds
-#ifdef BOARD_HEATUP
-    #define HEATUP BOARD_HEATUP
-#else
-    #define HEATUP 10
+#ifndef BOARD_HEATUP
+    #define BOARD_HEATUP 4
 #endif
+
+static uint8_t FAN_HEATUP[BOARD_HEATUP] = { 0 };
 
 // Fan speed is the highest HEATUP speed over COOLDOWN seconds
-#ifdef BOARD_COOLDOWN
-    #define COOLDOWN BOARD_COOLDOWN
-#else
-    #define COOLDOWN 10
+#ifndef BOARD_COOLDOWN
+    #define BOARD_COOLDOWN 10
 #endif
 
-// Interpolate duty cycle
-#define INTERPOLATE 0
+static uint8_t FAN_COOLDOWN[BOARD_COOLDOWN] = { 0 };
 
 // Tjunction = 100C for i7-8565U (and probably the same for all WHL-U)
 #define T_JUNCTION 100
 
-int16_t peci_offset = 0;
+bool peci_on = false;
 int16_t peci_temp = 0;
-uint8_t peci_duty = 0;
 
-#define PECI_TEMP(X) (((int16_t)(X)) << 6)
-#define PWM_DUTY(X) ((uint8_t)(((((uint16_t)(X)) * 255) + 99) / 100))
-
-struct FanPoint {
-    int16_t temp;
-    uint8_t duty;
-};
+#define PECI_TEMP(X) ((int16_t)(X))
 
 #define FAN_POINT(T, D) { .temp = PECI_TEMP(T), .duty = PWM_DUTY(D) }
 
@@ -56,80 +47,19 @@ static struct FanPoint __code FAN_POINTS[] = {
 #endif
 };
 
-// Get duty cycle based on temperature, adapted from
-// https://github.com/pop-os/system76-power/blob/master/src/fan.rs
-static uint8_t fan_duty(int16_t temp) {
-    for (int i = 0; i < ARRAY_SIZE(FAN_POINTS); i++) {
-        const struct FanPoint * cur = &FAN_POINTS[i];
-
-        // If exactly the current temp, return the current duty
-        if (temp == cur->temp) {
-            return cur->duty;
-        } else if (temp < cur->temp) {
-            // If lower than first temp, return 0%
-            if (i == 0) {
-                return PWM_DUTY(0);
-            } else {
-                const struct FanPoint * prev = &FAN_POINTS[i - 1];
-
-#if INTERPOLATE
-                // If in between current temp and previous temp, interpolate
-                if (temp > prev->temp) {
-                    int16_t dtemp = (cur->temp - prev->temp);
-                    int16_t dduty = ((int16_t)cur->duty) - ((int16_t)prev->duty);
-                    return (uint8_t)(
-                        ((int16_t)prev->duty) +
-                        ((temp - prev->temp) * dduty) / dtemp
-                    );
-                }
-#else // INTERPOLATE
-                return prev->duty;
-#endif // INTERPOLATE
-            }
-        }
-    }
-
-    // If no point is found, return 100%
-    return PWM_DUTY(100);
-}
-
-static uint8_t fan_heatup(uint8_t duty) {
-    static uint8_t history[HEATUP] = { 0 };
-    uint8_t lowest = duty;
-
-    int i;
-    for (i = 0; (i + 1) < ARRAY_SIZE(history); i++) {
-        uint8_t value = history[i + 1];
-        if (value < lowest) {
-            lowest = value;
-        }
-        history[i] = value;
-    }
-    history[i] = duty;
-
-    return lowest;
-}
-
-static uint8_t fan_cooldown(uint8_t duty) {
-    static uint8_t history[COOLDOWN] = { 0 };
-    uint8_t highest = duty;
-
-    int i;
-    for (i = 0; (i + 1) < ARRAY_SIZE(history); i++) {
-        uint8_t value = history[i + 1];
-        if (value > highest) {
-            highest = value;
-        }
-        history[i] = value;
-    }
-    history[i] = duty;
-
-    return highest;
-}
+static struct Fan __code FAN = {
+    .points = FAN_POINTS,
+    .points_size = ARRAY_SIZE(FAN_POINTS),
+    .heatup = FAN_HEATUP,
+    .heatup_size = ARRAY_SIZE(FAN_HEATUP),
+    .cooldown = FAN_COOLDOWN,
+    .cooldown_size = ARRAY_SIZE(FAN_COOLDOWN),
+    .interpolate = SMOOTH_FANS != 0,
+};
 
 void peci_init(void) {
     // Allow PECI pin to be used
-    GCR2 |= (1 << 4);
+    GCR2 |= BIT(4);
 
     // Set frequency to 1MHz
     HOCTL2R = 0x01;
@@ -146,7 +76,7 @@ int peci_wr_pkg_config(uint8_t index, uint16_t param, uint32_t data) {
     HOSTAR = HOSTAR;
 
     // Enable PECI, clearing data fifo's, enable AW_FCS
-    HOCTLR = (1 << 5) | (1 << 3) | (1 << 1);
+    HOCTLR = BIT(5) | BIT(3) | BIT(1);
     // Set address to default
     HOTRADDR = 0x30;
     // Set write length
@@ -176,7 +106,7 @@ int peci_wr_pkg_config(uint8_t index, uint16_t param, uint32_t data) {
     while (HOSTAR & 1) {}
 
     int status = (int)HOSTAR;
-    if (status & (1 << 1)) {
+    if (status & BIT(1)) {
         int cc = (int)HORDDR;
         if (cc & 0x80) {
             return -cc;
@@ -189,17 +119,25 @@ int peci_wr_pkg_config(uint8_t index, uint16_t param, uint32_t data) {
 }
 
 // PECI information can be found here: https://www.intel.com/content/dam/www/public/us/en/documents/design-guides/core-i7-lga-2011-guide.pdf
-void peci_event(void) {
-    if (power_state == POWER_STATE_S0) {
-        // Use PECI if in S0 state
+uint8_t peci_get_fan_duty(void) {
+    uint8_t duty;
 
+#if EC_ESPI
+    // Use PECI if CPU is not in C10 state
+    peci_on = gpio_get(&CPU_C10_GATE_N);
+#else // EC_ESPI
+    // Use PECI if in S0 state
+    peci_on = power_state == POWER_STATE_S0;
+#endif // EC_ESPI
+
+    if (peci_on) {
         // Wait for completion
         while (HOSTAR & 1) {}
         // Clear status
         HOSTAR = HOSTAR;
 
         // Enable PECI, clearing data fifo's
-        HOCTLR = (1 << 5) | (1 << 3);
+        HOCTLR = BIT(5) | BIT(3);
         // Set address to default
         HOTRADDR = 0x30;
         // Set write length
@@ -214,31 +152,34 @@ void peci_event(void) {
         // Wait for completion
         while (HOSTAR & 1) {}
 
-        if (HOSTAR & (1 << 1)) {
+        if (HOSTAR & BIT(1)) {
             // Use result if finished successfully
             uint8_t low = HORDDR;
             uint8_t high = HORDDR;
-            peci_offset = ((int16_t)high << 8) | (int16_t)low;
+            uint16_t peci_offset = (((int16_t)high << 8) | (int16_t)low) >> 6;
 
             peci_temp = PECI_TEMP(T_JUNCTION) + peci_offset;
-            peci_duty = fan_duty(peci_temp);
+            duty = fan_duty(&FAN, peci_temp);
         } else {
             // Default to 50% if there is an error
-            peci_offset = 0;
             peci_temp = 0;
-            peci_duty = PWM_DUTY(50);
+            duty = PWM_DUTY(50);
         }
     } else {
         // Turn fan off if not in S0 state
-        peci_offset = 0;
         peci_temp = 0;
-        peci_duty = PWM_DUTY(0);
+        duty = PWM_DUTY(0);
     }
 
-    uint8_t heatup_duty = fan_heatup(peci_duty);
-    uint8_t cooldown_duty = fan_cooldown(heatup_duty);
-    if (cooldown_duty != DCR2) {
-        DCR2 = cooldown_duty;
-        DEBUG("PECI offset=%d, temp=%d = %d\n", peci_offset, peci_temp, cooldown_duty);
+    if (peci_on && fan_max) {
+        // Override duty if fans are manually set to maximum
+        duty = PWM_DUTY(100);
+    } else {
+        // Apply heatup and cooldown filters to duty
+        duty = fan_heatup(&FAN, duty);
+        duty = fan_cooldown(&FAN, duty);
     }
+
+    DEBUG("PECI temp=%d\n", peci_temp);
+    return duty;
 }

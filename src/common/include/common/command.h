@@ -3,6 +3,8 @@
 #ifndef _COMMON_COMMAND_H
 #define _COMMON_COMMAND_H
 
+#include <common/macro.h>
+
 enum Command {
     // Indicates that EC is ready to accept commands
     CMD_NONE = 0,
@@ -26,6 +28,22 @@ enum Command {
     CMD_KEYMAP_GET = 9,
     // Set keyboard map index
     CMD_KEYMAP_SET = 10,
+    // Get LED value by index
+    CMD_LED_GET_VALUE = 11,
+    // Set LED value by index
+    CMD_LED_SET_VALUE = 12,
+    // Get LED color by index
+    CMD_LED_GET_COLOR = 13,
+    // Set LED color by index
+    CMD_LED_SET_COLOR = 14,
+    // Get LED matrix mode and speed
+    CMD_LED_GET_MODE = 15,
+    // Set LED matrix mode and speed
+    CMD_LED_SET_MODE = 16,
+    // Get key matrix state
+    CMD_MATRIX_GET = 17,
+    // Save LED settings to ROM
+    CMD_LED_SAVE = 18,
     //TODO
 };
 
@@ -39,13 +57,15 @@ enum Result {
 
 enum CommandSpiFlag {
     // Read from SPI chip if set, write otherwise
-    CMD_SPI_FLAG_READ = (1 << 0),
+    CMD_SPI_FLAG_READ = BIT(0),
     // Disable SPI chip after executing command
-    CMD_SPI_FLAG_DISABLE = (1 << 1),
+    CMD_SPI_FLAG_DISABLE = BIT(1),
     // Run firmware from scratch RAM if necessary
-    CMD_SPI_FLAG_SCRATCH = (1 << 2),
+    CMD_SPI_FLAG_SCRATCH = BIT(2),
     // Write to backup ROM instead
-    CMD_SPI_FLAG_BACKUP = (1 << 3),
+    CMD_SPI_FLAG_BACKUP = BIT(3),
 };
+
+#define CMD_LED_INDEX_ALL 0xFF
 
 #endif // _COMMON_COMMAND_H

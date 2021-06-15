@@ -1,4 +1,4 @@
-#![cfg_attr(not(feature = "std"), no_std)]
+// SPDX-License-Identifier: MIT
 
 //! Library for accessing System76 ECs
 //! First, construct an access method, using an object implementing the `Access` trait. Next, an Ec
@@ -13,6 +13,11 @@
 //!  - `EcLegacy`, `Pmc`, and `SuperIo` all require the `redox_hwio` feature and a nightly
 //!    compiler. It is only recommended to use these in firmware, as mutual exclusion is not
 //!    guaranteed.
+
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
 
 pub use self::access::*;
 mod access;

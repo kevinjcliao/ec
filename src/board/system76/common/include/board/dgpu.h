@@ -11,10 +11,9 @@
 
 #if HAVE_DGPU
     extern int16_t dgpu_temp;
-    extern uint8_t dgpu_duty;
 #endif // HAVE_DGPU
 
 void dgpu_init(void);
-void dgpu_event(void);
+uint8_t dgpu_get_fan_duty(void);
 
 #endif // _BOARD_DGPU_H

@@ -2,6 +2,7 @@
 
 #include <board/gpio.h>
 #include <common/debug.h>
+#include <common/macro.h>
 
 struct Gpio __code ACIN_N =         GPIO(B, 0);
 struct Gpio __code AC_PRESENT =     GPIO(E, 1);
@@ -40,21 +41,28 @@ void gpio_init() {
     // Enable LPC reset on GPD2
     GCR = 0x04;
     // Enable SMBus channel 4
-    GCR15 = (1 << 4);
+    GCR15 = BIT(4);
     // Set GPF2 and GPF3 to 3.3V
     GCR20 = 0;
 
     // Set GPIO data
-    GPDRA = 0x00;
-    GPDRB = 0x18;
-    GPDRC = 0x00;
-    GPDRD = 0x38;
-    GPDRE = 0x08;
-    GPDRF = 0x40;
-    GPDRG = 0x40;
-    GPDRH = 0x00;
-    GPDRI = 0x20;
-    GPDRJ = 0x02;
+    GPDRA = 0;
+    // XLP_OUT, PWR_SW#
+    GPDRB = BIT(4) | BIT(3);
+    GPDRC = 0;
+    // PWR_BTN#, SMI#, SCI#
+    GPDRD = BIT(5) | BIT(4) | BIT(3);
+    // USB_PWR_EN#
+    GPDRE = BIT(3);
+    // EC_PECI
+    GPDRF = BIT(6);
+    // H_PROCHOT#_EC
+    GPDRG = BIT(6);
+    GPDRH = 0;
+    // EC_AMP_EN
+    GPDRI = BIT(5);
+    // KBC_MUTE#
+    GPDRJ = BIT(1);
 
     // Set GPIO control
     // EC_PWM_PIN_24
@@ -87,7 +95,7 @@ void gpio_init() {
     GPCRB5 = GPIO_OUT | GPIO_UP;
     // SUSBC_EN#
     GPCRB6 = GPIO_OUT | GPIO_UP;
-    //
+    // Does not exist
     GPCRB7 = GPIO_IN;
     // ALL_SYS_PWRGD
     GPCRC0 = GPIO_IN;
@@ -108,7 +116,7 @@ void gpio_init() {
     // LED_PWR
     GPCRD0 = GPIO_OUT | GPIO_UP;
     // CCD_EN
-    GPCRD1 = GPIO_OUT | GPIO_UP;
+    GPCRD1 = GPIO_OUT;
     // BUF_PLT_RST#
     GPCRD2 = GPIO_ALT;
     // SCI#

@@ -1,8 +1,12 @@
+// SPDX-License-Identifier: MIT
+
 /// Errors returned by operations
 #[derive(Debug)]
 pub enum Error {
     /// Data length is too large
     DataLength(usize),
+    /// Operation not supported
+    NotSupported,
     /// A parameter was invalid
     Parameter,
     /// EC protocol returned an error result
@@ -25,4 +29,18 @@ pub enum Error {
     /// Encountered a hidapi::Error
     #[cfg(feature = "hidapi")]
     Hid(hidapi::HidError),
+}
+
+#[cfg(feature = "std")]
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+#[cfg(feature = "hidapi")]
+impl From<hidapi::HidError> for Error {
+    fn from(error: hidapi::HidError) -> Self {
+        Self::Hid(error)
+    }
 }

@@ -3,8 +3,16 @@
 #ifndef _EC_GPIO_H
 #define _EC_GPIO_H
 
+#include <common/macro.h>
+
 #include <stdbool.h>
 #include <stdint.h>
+
+#define GPIO_ALT    (0b00U << 6)
+#define GPIO_IN     (0b10U << 6)
+#define GPIO_OUT    (0b01U << 6)
+#define GPIO_UP     BIT(2)
+#define GPIO_DOWN   BIT(1)
 
 struct Gpio {
     volatile uint8_t __xdata * data;
@@ -17,7 +25,7 @@ struct Gpio {
     .data = &GPDR ## BLOCK, \
     .mirror = &GPDMR ## BLOCK, \
     .control = &GPCR ## BLOCK ## NUMBER, \
-    .value = (1 << NUMBER), \
+    .value = BIT(NUMBER), \
 }
 
 bool gpio_get(struct Gpio * gpio);
@@ -44,6 +52,7 @@ volatile uint8_t __xdata __at(0x16E1) GCR17;
 volatile uint8_t __xdata __at(0x16E2) GCR18;
 volatile uint8_t __xdata __at(0x16E4) GCR19;
 volatile uint8_t __xdata __at(0x16E5) GCR20;
+volatile uint8_t __xdata __at(0x16E6) GCR21;
 
 volatile uint8_t __xdata __at(0x1601) GPDRA;
 volatile uint8_t __xdata __at(0x1602) GPDRB;
